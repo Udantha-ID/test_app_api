@@ -1,39 +1,133 @@
 <?php
-header("Content-Type: application/json");
+header("Content-Type: application/json; charset=UTF-8");
 require_once __DIR__ . "/../assets/includes/db_connect.php";
 
-$employee_id = intval($_GET["employee_id"] ?? 0);
-$year = intval($_GET["year"] ?? date("Y"));
+ini_set("display_errors", 0);
+error_reporting(E_ALL);
 
-if ($employee_id <= 0) {
-  http_response_code(400);
-  echo json_encode(["success" => false, "message" => "employee_id required"]);
-  exit;
-}
+register_shutdown_function(function () {
+  $err = error_get_last();
+  if ($err && in_array($err["type"], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+    http_response_code(500);
+    echo json_encode([
+      "success" => false,
+      "message" => "FATAL: " . $err["message"],
+      "file" => basename($err["file"]),
+      "line" => $err["line"],
+    ]);
+  }
+});
 
-$stmt = $conn->prepare("SELECT employee_id, year, annual_days, sick_days, casual_days
-                        FROM leave_balances
-                        WHERE employee_id = ? AND year = ?
-                        LIMIT 1");
-$stmt->bind_param("ii", $employee_id, $year);
-$stmt->execute();
-$res = $stmt->get_result();
-
-if ($res->num_rows === 0) {
-  // return empty default if no record
+set_error_handler(function ($severity, $message, $file, $line) {
+  http_response_code(500);
   echo json_encode([
-    "success" => true,
-    "data" => [
-      "employee_id" => $employee_id,
-      "year" => $year,
-      "annual_days" => 0,
-      "sick_days" => 0,
-      "casual_days" => 0
-    ]
+    "success" => false,
+    "message" => "PHP: $message",
+    "file" => basename($file),
+    "line" => $line,
   ]);
   exit;
+});
+
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+
+try {
+  if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+    http_response_code(405);
+    echo json_encode(["success" => false, "message" => "Method not allowed"]);
+    exit;
+  }
+
+  $raw = file_get_contents("php://input");
+  $data = json_decode($raw, true);
+
+  if (!is_array($data)) {
+    http_response_code(400);
+    echo json_encode(["success" => false, "message" => "Invalid JSON body"]);
+    exit;
+  }
+
+  $employeeId = trim($data["employeeId"] ?? "");
+  if ($employeeId === "") {
+    http_response_code(400);
+    echo json_encode(["success" => false, "message" => "employeeId required"]);
+    exit;
+  }
+
+  /**
+   * We will return:
+   * - remaining for annual/sick/casual
+   * - totals (entitlement) for annual/sick/casual
+   *
+   * Using leave_policies.name to map policy types.
+   * Assumption: leave policy names are exactly:
+   * "Annual Leave", "Sick Leave", "Casual Leave"
+   */
+
+  $sql = "
+    SELECT
+      p.name AS policy_name,
+      COALESCE(y.leave_entitlement, 0) AS total_allowed,
+      COALESCE(b.total_taken, 0) AS total_taken,
+      COALESCE(b.remaining, COALESCE(y.leave_entitlement, 0) - COALESCE(b.total_taken, 0)) AS remaining
+    FROM leave_policies p
+    LEFT JOIN employee_yearly_leave_balance y
+      ON y.leave_policy_id = p.leave_policy_id
+     AND y.employee_id = ?
+    LEFT JOIN employee_leave_balances b
+      ON b.leave_policy_id = p.leave_policy_id
+     AND b.employee_id = ?
+    ORDER BY p.leave_policy_id
+  ";
+
+  $stmt = $conn->prepare($sql);
+  $stmt->bind_param("ss", $employeeId, $employeeId);
+  $stmt->execute();
+  $res = $stmt->get_result();
+
+  // defaults
+  $out = [
+    "annual_days" => "0.00",
+    "sick_days" => "0.00",
+    "casual_days" => "0.00",
+    "annual_total" => "0.00",
+    "sick_total" => "0.00",
+    "casual_total" => "0.00",
+  ];
+
+  while ($row = $res->fetch_assoc()) {
+    $name = $row["policy_name"];
+    $remaining = number_format((float)$row["remaining"], 2, ".", "");
+    $total = number_format((float)$row["total_allowed"], 2, ".", "");
+
+    if ($name === "Annual Leave") {
+      $out["annual_days"] = $remaining;
+      $out["annual_total"] = $total;
+    } elseif ($name === "Sick Leave") {
+      $out["sick_days"] = $remaining;
+      $out["sick_total"] = $total;
+    } elseif ($name === "Casual Leave") {
+      $out["casual_days"] = $remaining;
+      $out["casual_total"] = $total;
+    }
+  }
+
+  echo json_encode([
+    "success" => true,
+    "message" => "Leave balance loaded",
+    "data" => $out
+  ]);
+
+  $stmt->close();
+  $conn->close();
+  exit;
+
+} catch (Throwable $e) {
+  http_response_code(500);
+  echo json_encode([
+    "success" => false,
+    "message" => "EXCEPTION: " . $e->getMessage(),
+    "file" => basename($e->getFile()),
+    "line" => $e->getLine(),
+  ]);
 }
-
-$row = $res->fetch_assoc();
-
-echo json_encode(["success" => true, "data" => $row]);
