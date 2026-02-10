@@ -2,7 +2,7 @@
 $host = "localhost";
 $user = "root";
 $pass = "";
-$db = "explore_holding";
+$db = "admin_erp";
 
 $conn = new mysqli($host, $user, $pass, $db);
 

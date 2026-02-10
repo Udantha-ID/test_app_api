@@ -2,114 +2,195 @@
 header("Content-Type: application/json; charset=UTF-8");
 require_once __DIR__ . "/../assets/includes/db_connect.php";
 
-// Convert PHP warnings/notices into JSON (prevents <br/> breaking jsonDecode)
+ini_set("display_errors", 0);
+error_reporting(E_ALL);
+
+//Return JSON on fatal errors (prevents empty response)
+register_shutdown_function(function () {
+  $err = error_get_last();
+  if ($err && in_array($err["type"], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+    http_response_code(500);
+    echo json_encode([
+      "success" => false,
+      "message" => "FATAL: " . $err["message"],
+      "file" => basename($err["file"]),
+      "line" => $err["line"],
+    ]);
+  }
+});
+
+//Convert warnings/notices to JSON
 set_error_handler(function ($severity, $message, $file, $line) {
   http_response_code(500);
   echo json_encode([
     "success" => false,
-    "message" => "PHP Error: $message",
+    "message" => "PHP: $message",
     "file" => basename($file),
-    "line" => $line
+    "line" => $line,
   ]);
   exit;
 });
 
-// Only POST
-if ($_SERVER["REQUEST_METHOD"] !== "POST") {
-  http_response_code(405);
-  echo json_encode(["success" => false, "message" => "Method not allowed"]);
-  exit;
-}
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
-// Read JSON body
-$raw = file_get_contents("php://input");
-$data = json_decode($raw, true);
+try {
+  if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+    http_response_code(405);
+    echo json_encode(["success" => false, "message" => "Method not allowed"]);
+    exit;
+  }
 
-if (!is_array($data)) {
-  http_response_code(400);
-  echo json_encode(["success" => false, "message" => "Invalid JSON body"]);
-  exit;
-}
+  $raw = file_get_contents("php://input");
+  $data = json_decode($raw, true);
 
-$username = trim($data["username"] ?? "");
-$password = trim($data["password"] ?? "");
+  if (!is_array($data)) {
+    http_response_code(400);
+    echo json_encode(["success" => false, "message" => "Invalid JSON body"]);
+    exit;
+  }
 
-if ($username === "" || $password === "") {
-  http_response_code(400);
-  echo json_encode(["success" => false, "message" => "Username and password required"]);
-  exit;
-}
+  $email = trim($data["email"] ?? "");
+  $password = trim($data["password"] ?? "");
 
-// Query
-$stmt = $conn->prepare("
+  if ($email === "" || $password === "") {
+    http_response_code(400);
+    echo json_encode(["success" => false, "message" => "Email and password required"]);
+    exit;
+  }
+
+  //IMPORTANT: employee_job table name used here
+$sql = "
   SELECT
-    e.id,
-    e.username,
-    e.password,
-    e.employee_no,
-    e.full_name,
-    e.contact_no,
-    e.is_active,
-    d.name AS department
-  FROM employees e
-  JOIN departments d ON d.id = e.department_id
-  WHERE e.username = ?
+    u.id AS user_id,
+    u.email,
+    u.password AS user_password,
+    u.employee_id,
+
+    e.employee_code,
+    e.first_name,
+    e.middle_name,
+    e.last_name,
+    e.employment_status,
+    e.date_of_birth,
+
+    ej.department_id,
+    d.name AS department_name,
+
+    ej.job_title_id,
+    ej.employment_type,
+    ej.employment_level,
+    ej.date_of_joining,
+    ej.probation_end_date,
+    ej.reporting_manager_id,
+    ej.work_location_id,
+
+    ec.contact_value AS primary_contact,
+    ec.contact_type AS primary_contact_type,
+
+    -- manager details (self join)
+    m.employee_code AS manager_code,
+    m.first_name AS manager_first_name,
+    m.middle_name AS manager_middle_name,
+    m.last_name AS manager_last_name
+
+  FROM users u
+  JOIN employees e ON e.employee_id = u.employee_id
+  LEFT JOIN employee_job ej ON ej.employee_id = e.employee_id
+  LEFT JOIN departments d ON d.department_id = ej.department_id
+  LEFT JOIN employee_contacts ec
+    ON ec.employee_id = e.employee_id AND ec.is_primary = 1
+
+  -- self join employees table to get manager info
+  LEFT JOIN employees m ON m.employee_id = ej.reporting_manager_id
+
+  WHERE u.email = ?
   LIMIT 1
-");
+";
 
-if (!$stmt) {
+
+  $stmt = $conn->prepare($sql);
+  $stmt->bind_param("s", $email);
+  $stmt->execute();
+  $res = $stmt->get_result();
+
+  if ($res->num_rows === 0) {
+    http_response_code(401);
+    echo json_encode(["success" => false, "message" => "Invalid email or password"]);
+    exit;
+  }
+
+  $row = $res->fetch_assoc();
+
+  //Optional: block inactive employees
+  if (($row["employment_status"] ?? "") !== "ACTIVE") {
+    http_response_code(403);
+    echo json_encode(["success" => false, "message" => "Employee is not active"]);
+    exit;
+  }
+
+  // Plain password compare (no hash for now)
+  if ($password !== $row["user_password"]) {
+    http_response_code(401);
+    echo json_encode(["success" => false, "message" => "Invalid email or password"]);
+    exit;
+  }
+
+  $managerName = trim(
+  ($row["manager_first_name"] ?? "") . " " .
+  ($row["manager_middle_name"] ?? "") . " " .
+  ($row["manager_last_name"] ?? "")
+);
+
+
+  $fullName = trim(
+    ($row["first_name"] ?? "") . " " .
+    ($row["middle_name"] ?? "") . " " .
+    ($row["last_name"] ?? "")
+  );
+
+  echo json_encode([
+    "success" => true,
+    "message" => "Login success",
+    "user" => [
+      "userId" => (int)$row["user_id"],
+      "employeeId" => $row["employee_id"],
+      "email" => $row["email"],
+
+      "employeeCode" => $row["employee_code"],
+      "name" => $fullName,
+      "lastName" => $row["last_name"] ?? "",
+      "firstName" => $row["first_name"] ?? "",
+      "middleName" => $row["middle_name"] ?? "",
+      "dateOfBirth" => $row["date_of_birth"] ?? "",
+
+
+      "departmentId" => $row["department_id"],
+      "department" => $row["department_name"] ?? "",
+
+      "jobTitleId" => $row["job_title_id"],
+      "employmentType" => $row["employment_type"],
+      "employmentLevel" => $row["employment_level"],
+      "dateOfJoining" => $row["date_of_joining"],
+      "probationEndDate" => $row["probation_end_date"],
+      "reportingManagerId" => $row["reporting_manager_id"],
+      "reportingManagerName" => $managerName,
+      "workLocationId" => $row["work_location_id"],
+
+      "primaryContact" => $row["primary_contact"] ?? ""
+
+    ]
+  ]);
+
+  $stmt->close();
+  $conn->close();
+  exit;
+
+} catch (Throwable $e) {
   http_response_code(500);
-  echo json_encode(["success" => false, "message" => "Server error: prepare failed"]);
-  exit;
+  echo json_encode([
+    "success" => false,
+    "message" => "EXCEPTION: " . $e->getMessage(),
+    "file" => basename($e->getFile()),
+    "line" => $e->getLine(),
+  ]);
 }
-
-$stmt->bind_param("s", $username);
-$stmt->execute();
-$res = $stmt->get_result();
-
-if (!$res || $res->num_rows === 0) {
-  http_response_code(401);
-  echo json_encode(["success" => false, "message" => "Invalid username or password"]);
-  $stmt->close();
-  $conn->close();
-  exit;
-}
-
-$row = $res->fetch_assoc();
-
-// Block disabled users (optional)
-if ((int)$row["is_active"] !== 1) {
-  http_response_code(403);
-  echo json_encode(["success" => false, "message" => "Account is disabled"]);
-  $stmt->close();
-  $conn->close();
-  exit;
-}
-
-// Plain compare
-if ($password !== $row["password"]) {
-  http_response_code(401);
-  echo json_encode(["success" => false, "message" => "Invalid username or password"]);
-  $stmt->close();
-  $conn->close();
-  exit;
-}
-
-// Success (NEVER return password)
-http_response_code(200);
-echo json_encode([
-  "success" => true,
-  "message" => "Login success",
-  "user" => [
-    "id" => (int)$row["id"],
-    "username" => $row["username"],
-    "employeeNo" => $row["employee_no"],
-    "name" => $row["full_name"],
-    "department" => $row["department"],
-    "contact" => $row["contact_no"]
-  ]
-]);
-
-$stmt->close();
-$conn->close();
-exit;
