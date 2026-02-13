@@ -37,7 +37,7 @@ try {
   // If no reliever selected, store NULL
   $overseeMemberIdDb = ($overseeMemberId === "") ? null : $overseeMemberId;
 
-  // ✅ Optional: validate remaining balance before allowing request
+  // Optional: validate remaining balance before allowing request
   // (If you want to allow request even if not enough, remove this block)
   $checkSql = "SELECT remaining FROM employee_leave_balances WHERE employee_id=? AND leave_policy_id=? LIMIT 1";
   $checkStmt = $conn->prepare($checkSql);
@@ -53,7 +53,7 @@ try {
     exit;
   }
 
-  // ✅ Insert leave request (PENDING)
+  // Insert leave request (PENDING)
   $sql = "
     INSERT INTO leave_requests
       (employee_id, leave_policy_id, leave_start_date, leave_end_date, number_of_days,
