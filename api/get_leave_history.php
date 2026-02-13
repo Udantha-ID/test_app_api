@@ -34,6 +34,7 @@ try {
         lr.number_of_days,
         lr.status,
         lr.manager_comment,
+        lr.reliever_comment,
         lr.requested_at
     FROM leave_requests lr
     JOIN leave_policies lp ON lp.leave_policy_id = lr.leave_policy_id
