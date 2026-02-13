@@ -48,7 +48,7 @@ try {
     }
     // force same day and half day count
     $endDate = $startDate;
-    $days = 0.5;
+    $days = 1.0;
   } else {
     // normal leave must have endDate and days > 0
     $halfDaySession = null;
