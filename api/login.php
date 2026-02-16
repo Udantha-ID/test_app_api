@@ -134,7 +134,7 @@ try {
   }
 
   /**
-   * ✅ PASSWORD CHECK (HASHED)
+   *   PASSWORD CHECK (HASHED)
    * - If your DB already has hashed passwords -> password_verify only
    * - If you still have plain text passwords in DB -> this block supports BOTH (temporary)
    *

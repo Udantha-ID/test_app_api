@@ -49,7 +49,7 @@ try {
         SELECT 1
         FROM leave_requests lr
         WHERE lr.employee_id = e.employee_id
-          AND lr.status = 'APPROVED'
+          AND lr.status IN ('APPROVED', 'PENDING')
           AND NOT (lr.leave_end_date < ? OR lr.leave_start_date > ?)
       )
     ORDER BY name
