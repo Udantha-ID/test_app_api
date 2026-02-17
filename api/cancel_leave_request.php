@@ -38,7 +38,7 @@ try {
     DELETE FROM leave_requests
     WHERE leave_request_id = ?
       AND employee_id = ?
-      AND status IN ('PENDING', 'RELIEVER DECLINED')
+      AND status IN ('PENDING', 'RELIEVER DECLINED', 'RELIEVER ACCEPTED')
   ";
 
   $stmt = $conn->prepare($sql);
