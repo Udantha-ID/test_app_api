@@ -64,8 +64,9 @@ try {
     ORDER BY name
   ";
 
+  // Notice: now 5 params because we added employeeId again for subquery
   $stmt = $conn->prepare($sql);
-  $stmt->bind_param("ssss", $departmentId, $employeeId, $fromDate, $toDate);
+  $stmt->bind_param("sssss", $departmentId, $employeeId, $employeeId, $fromDate, $toDate);
   $stmt->execute();
   $res = $stmt->get_result();
 
