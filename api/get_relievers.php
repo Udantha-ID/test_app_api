@@ -45,6 +45,15 @@ try {
     WHERE ej.department_id = ?
       AND e.employment_status = 'ACTIVE'
       AND e.employee_id <> ?
+
+      -- REMOVE REPORTING MANAGER FROM RELIEVER LIST
+      AND e.employee_id <> (
+        SELECT ej2.reporting_manager_id
+        FROM employee_job ej2
+        WHERE ej2.employee_id = ?
+        LIMIT 1
+      )
+
       AND NOT EXISTS (
         SELECT 1
         FROM leave_requests lr
