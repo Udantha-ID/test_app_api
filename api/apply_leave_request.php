@@ -94,11 +94,14 @@ try {
 
   $stmt->execute();
 
+  $leaveRequestId = (int)$conn->insert_id;
+
   echo json_encode([
     "success" => true,
     "message" => "Leave request submitted",
-    "leaveRequestId" => $conn->insert_id
+    "leave_request_id" => $leaveRequestId
   ]);
+
 
   $stmt->close();
   $conn->close();

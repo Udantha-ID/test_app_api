@@ -31,6 +31,9 @@ try {
       lr.updated_at,
       lr.reliever_comment,
 
+      lrd.file_name AS attachment_name,
+      lrd.file_path AS attachment_path,
+
       -- employee code + name
       e.employee_code,
       CONCAT(
@@ -60,6 +63,9 @@ try {
 
     LEFT JOIN job_titles jt
       ON jt.job_title_id = ej.job_title_id
+
+    LEFT JOIN leave_request_documents lrd
+      ON lrd.leave_request_id = lr.leave_request_id
 
     LEFT JOIN employees ov
       ON ov.employee_id = lr.oversee_member_id
